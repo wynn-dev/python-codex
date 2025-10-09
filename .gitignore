@@ -32,3 +32,5 @@ ENV/
 *.swo
 *~
 .DS_Store
+
+test_workspace/

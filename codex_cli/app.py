@@ -19,50 +19,68 @@ class CodexApp(App):
     
     CSS = """
     Screen {
-        background: $surface;
+        background: #0d0d0d;
     }
     
     #main-container {
         height: 100%;
+        background: #0d0d0d;
     }
     
     #input-container {
         dock: bottom;
         height: auto;
-        background: $panel;
+        background: #121212;
         padding: 1 2;
-        border-top: heavy $primary;
+        border-top: solid #2a2a2a;
     }
     
     Input {
         width: 100%;
+        background: #121212;
+        border: none;
+        padding: 0 0;
+    }
+    
+    Input:focus {
+        border: none;
     }
     
     Header {
-        background: $primary;
+        background: #0d0d0d;
+        color: #888888;
+        height: 1;
+        padding: 0 2;
     }
     
     Footer {
-        background: $primary-darken-1;
+        background: #0d0d0d;
+        color: #666666;
+        height: 1;
+    }
+    
+    ConversationView {
+        scrollbar-background: #0d0d0d;
+        scrollbar-color: #3a3a3a;
+        scrollbar-color-hover: #4a4a4a;
     }
     """
     
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit", show=True),
         Binding("ctrl+l", "clear", "Clear", show=True),
-        Binding("ctrl+r", "reset", "Reset", show=False),
         Binding("ctrl+h", "help", "Help", show=True),
-        Binding("ctrl+w", "workspace_info", "Workspace", show=True),
+        Binding("ctrl+w", "workspace_info", "Info", show=True),
     ]
     
-    TITLE = "Codex CLI - AI Coding Assistant"
+    TITLE = "codex"
     
     def __init__(self, workspace_path: Path):
         super().__init__()
         self.workspace_path = workspace_path
         self.client = CodexClient(self.workspace_path)
         self.is_processing = False
-        self.sub_title = f"📁 {self.workspace_path.name}"
+        self.sub_title = f"{self.workspace_path.name}"
     
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -73,7 +91,7 @@ class CodexApp(App):
             
             with Container(id="input-container"):
                 yield Input(
-                    placeholder="Ask me anything about your code... (Press Enter to send)",
+                    placeholder="›",
                     id="message-input"
                 )
         
@@ -82,39 +100,20 @@ class CodexApp(App):
     
     async def on_mount(self) -> None:
         """Called when app starts."""
-        # Show welcome message
+        # Show minimal welcome message
         conv_view = self.query_one(ConversationView)
         
-        welcome_msg = f"""# Welcome to Codex CLI! 🚀
+        welcome_msg = f"""codex — ai coding assistant
 
-I'm your AI coding assistant powered by **Claude 3.5 Sonnet**. I can help you with:
+workspace: {self.workspace_path}
 
-- 📝 Reading and writing files
-- 🔍 Searching your codebase
-- 🏃 Running shell commands
-- 🐛 Debugging code
-- 💡 Generating new code
-- 📚 Explaining complex concepts
+available commands:
+  ctrl+h — help
+  ctrl+w — workspace info
+  ctrl+l — clear history
+  ctrl+c — exit
 
-**Workspace:** `{self.workspace_path}`
-
-**Available Tools:**
-- `read_file` - Read file contents
-- `write_file` - Create or update files
-- `list_directory` - List directory contents
-- `execute_command` - Run shell commands
-- `search_files` - Find files by pattern
-- `delete_file` - Remove files
-- `get_workspace_info` - Get workspace information
-
-**Keyboard Shortcuts:**
-- `Ctrl+C` - Quit
-- `Ctrl+L` - Clear conversation
-- `Ctrl+H` - Show this help
-- `Ctrl+W` - Show workspace info
-
-What can I help you with today?
-"""
+ready"""
         conv_view.add_message("assistant", welcome_msg)
         
         # Focus input
@@ -136,42 +135,134 @@ What can I help you with today?
         conv_view = self.query_one(ConversationView)
         conv_view.add_message("user", message)
         
+        # Show loading indicator
+        conv_view.show_loading("processing")
+        
         # Update status
         status_bar = self.query_one(StatusBar)
         status_bar.set_thinking()
         
         self.is_processing = True
+        streaming_started = False
         
         try:
-            # Track assistant response
-            assistant_response = []
-            
-            # Send message and handle tool calls
-            async for content, tool_info in self.client.send_message(message):
-                if tool_info:
-                    # Handle tool call or result
-                    if tool_info["type"] == "tool_call":
-                        tool_msg = f"**Calling:** `{tool_info['name']}`\n**Arguments:** ```json\n{json.dumps(tool_info['arguments'], indent=2)}\n```"
-                        conv_view.add_message("tool_call", tool_msg)
+            # Send message and handle streaming
+            async for content, info in self.client.send_message(message):
+                if info:
+                    info_type = info.get("type")
                     
-                    elif tool_info["type"] == "tool_result":
-                        conv_view.add_message("tool_result", tool_info["result"])
+                    # Handle thinking/reasoning
+                    if info_type == "thinking_start":
+                        if not streaming_started:
+                            conv_view.start_streaming()
+                            streaming_started = True
+                        conv_view.start_thinking()
+                        status_bar.set_thinking()
+                    
+                    elif info_type == "reasoning":
+                        if content:
+                            conv_view.append_thinking(content)
+                    
+                    elif info_type == "thinking_end":
+                        conv_view.end_thinking()
+                        status_bar.set_streaming()
+                    
+                    # Handle streaming content
+                    elif info_type == "content":
+                        if not streaming_started:
+                            conv_view.start_streaming()
+                            streaming_started = True
+                            status_bar.set_streaming()
+                        
+                        if content:
+                            conv_view.append_to_stream(content)
+                    
+                    # Handle tool calls
+                    elif info_type == "tool_call":
+                        if streaming_started:
+                            conv_view.finalize_stream()
+                            streaming_started = False
+                        
+                        # Format tool call in a user-friendly way
+                        tool_name = info['name']
+                        args = info['arguments']
+                        
+                        # Create readable description based on tool
+                        if tool_name == "read_file":
+                            tool_msg = f"{tool_name}\n→ reading {args.get('file_path', 'file')}"
+                        elif tool_name == "write_file":
+                            tool_msg = f"{tool_name}\n→ writing to {args.get('file_path', 'file')}"
+                        elif tool_name == "delete_file":
+                            tool_msg = f"{tool_name}\n→ deleting {args.get('file_path', 'file')}"
+                        elif tool_name == "list_directory":
+                            path = args.get('directory_path', '.')
+                            tool_msg = f"{tool_name}\n→ listing {path if path else 'current directory'}"
+                        elif tool_name == "execute_command":
+                            cmd = args.get('command', '')
+                            # Truncate long commands
+                            display_cmd = cmd if len(cmd) < 50 else cmd[:47] + "..."
+                            tool_msg = f"{tool_name}\n→ running: {display_cmd}"
+                        elif tool_name == "search_files":
+                            tool_msg = f"{tool_name}\n→ searching for {args.get('pattern', '*')}"
+                        elif tool_name == "get_workspace_info":
+                            tool_msg = f"{tool_name}\n→ gathering workspace stats"
+                        else:
+                            # Fallback for unknown tools - show args in a clean way
+                            arg_str = ", ".join(f"{k}={v}" for k, v in args.items())
+                            if len(arg_str) > 60:
+                                arg_str = arg_str[:57] + "..."
+                            tool_msg = f"{tool_name}\n→ {arg_str}"
+                        
+                        conv_view.add_message("tool_call", tool_msg)
+                        
+                        # Show loading for tool execution
+                        conv_view.show_loading(f"executing {info['name']}")
+                        status_bar.update_status(f"exec {info['name']}")
+                    
+                    elif info_type == "tool_result":
+                        conv_view.hide_loading()
+                        conv_view.add_message("tool_result", info["result"])
+                        status_bar.set_thinking()
+                    
+                    # Handle completion
+                    elif info_type == "complete":
+                        if streaming_started:
+                            conv_view.finalize_stream()
+                            streaming_started = False
+                    
+                    # Handle errors
+                    elif info_type == "error":
+                        if streaming_started:
+                            conv_view.finalize_stream()
+                            streaming_started = False
+                        if content:
+                            conv_view.add_message("error", content)
+                        status_bar.set_error("error")
+                    
+                    elif info_type == "warning":
+                        if content:
+                            conv_view.add_message("error", content)
                 
                 else:
-                    # Regular content
+                    # Regular content without info
+                    if content and not streaming_started:
+                        conv_view.start_streaming()
+                        streaming_started = True
+                    
                     if content:
-                        assistant_response.append(content)
+                        conv_view.append_to_stream(content)
             
-            # Add final assistant response if any
-            if assistant_response:
-                final_response = "".join(assistant_response)
-                conv_view.add_message("assistant", final_response)
+            # Ensure stream is finalized
+            if streaming_started:
+                conv_view.finalize_stream()
         
         except Exception as e:
-            conv_view.add_message("error", f"An error occurred: {str(e)}")
-            status_bar.set_error(str(e))
+            conv_view.hide_loading()
+            conv_view.add_message("error", f"error: {str(e)}")
+            status_bar.set_error("error")
         
         finally:
+            conv_view.hide_loading()
             self.is_processing = False
             status_bar.set_ready()
             
@@ -186,14 +277,8 @@ What can I help you with today?
         # Also clear client history
         self.client.clear_history()
         
-        # Add welcome message again
-        conv_view.add_message("assistant", "Conversation cleared. How can I help you?")
-    
-    def action_reset(self) -> None:
-        """Reset the application."""
-        self.action_clear()
-        status_bar = self.query_one(StatusBar)
-        status_bar.set_ready()
+        # Add minimal message
+        conv_view.add_message("assistant", "history cleared")
     
     def action_workspace_info(self) -> None:
         """Show workspace information."""
@@ -207,87 +292,47 @@ What can I help you with today?
             file_count = "?"
             dir_count = "?"
         
-        workspace_info = f"""# Workspace Information
+        workspace_info = f"""workspace info
 
-**Path:** `{self.workspace_path}`  
-**Absolute Path:** `{self.workspace_path.resolve()}`  
-**Name:** `{self.workspace_path.name}`  
-**Parent:** `{self.workspace_path.parent}`
+path        {self.workspace_path}
+absolute    {self.workspace_path.resolve()}
+files       {file_count}
+directories {dir_count}
 
-**Statistics:**
-- Files: {file_count}
-- Directories: {dir_count}
-
-**Tip:** To work in a different directory:
-- Quit this session (Ctrl+C)
-- Run: `codex /path/to/other/directory`
-- Or: `codex ../relative/path`
-
-**Example:**
-```bash
-# Open a specific project
-codex ~/projects/my-app
-
-# Open parent directory
-codex ..
-
-# Open from anywhere
-codex /absolute/path/to/project
-```
-"""
+to change workspace:
+  codex /path/to/directory"""
         conv_view.add_message("assistant", workspace_info)
     
     def action_help(self) -> None:
         """Show help message."""
         conv_view = self.query_one(ConversationView)
         
-        help_msg = """# Codex CLI Help
+        help_msg = """codex — help
 
-## Keyboard Shortcuts
-- `Ctrl+C` - Quit the application
-- `Ctrl+L` - Clear conversation history
-- `Ctrl+H` - Show this help message
-- `Ctrl+W` - Show workspace information
+keyboard shortcuts
+  ctrl+c — quit
+  ctrl+l — clear history
+  ctrl+h — show help
+  ctrl+w — workspace info
 
-## Available Tools
+available tools
+  read_file          read file contents
+  write_file         create or update files
+  delete_file        remove files
+  list_directory     list directory contents
+  search_files       find files by pattern
+  execute_command    run shell commands
+  get_workspace_info workspace statistics
 
-### File Operations
-- **read_file** - Read contents of a file
-- **write_file** - Create or update a file
-- **delete_file** - Remove a file
-- **search_files** - Find files matching a pattern
+workspace management
+  codex ~/projects/app    open specific directory
+  codex ..               open parent directory
+  codex /abs/path        open absolute path
 
-### Directory Operations
-- **list_directory** - List contents of a directory
-- **get_workspace_info** - Get current workspace information
-
-### Command Execution
-- **execute_command** - Run shell commands (use with caution)
-
-## Working with Different Directories
-
-To open a different workspace:
-1. Press `Ctrl+C` to quit
-2. Run `codex /path/to/directory`
-
-Examples:
-- `codex ~/projects/my-app` - Open specific project
-- `codex ..` - Open parent directory
-- `codex /absolute/path` - Open absolute path
-
-## Tips
-- Be specific in your requests
-- I can handle multiple files at once
-- I'll automatically use tools when needed
-- You can ask me to explain what I'm doing
-
-## Examples
-- "Read the README.md file"
-- "Create a new Python file called hello.py with a hello world function"
-- "List all Python files in the current directory"
-- "Execute the command 'ls -la'"
-- "Search for all .js files in the src directory"
-"""
+streaming features
+  real-time responses
+  extended reasoning (watch the ai think)
+  live tool execution feedback"""
         conv_view.add_message("assistant", help_msg)
 
 

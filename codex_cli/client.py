@@ -1,4 +1,4 @@
-"""OpenRouter client wrapper with tool calling support."""
+"""OpenRouter client wrapper with tool calling support and streaming."""
 
 import json
 from typing import List, Dict, Any, Optional, AsyncIterator
@@ -71,8 +71,11 @@ When using tools:
     
     async def send_message(self, user_message: str) -> AsyncIterator[tuple[str, Optional[Dict]]]:
         """
-        Send a message and handle tool calls automatically.
-        Yields tuples of (content_chunk, tool_info) where tool_info is present for tool calls.
+        Send a message and handle tool calls automatically with streaming.
+        Yields tuples of (content_chunk, info_dict) where info_dict contains:
+        - type: "reasoning", "content", "tool_call", "tool_result", "thinking_start", "thinking_end"
+        - content: the actual content
+        - other metadata as needed
         """
         # Add user message to history
         self.conversation_history.append(Message(role="user", content=user_message))
@@ -89,54 +92,103 @@ When using tools:
         while iteration < max_iterations:
             iteration += 1
             
-            # Call the API
+            # Call the API with streaming
             try:
-                response = await self.client.chat.completions.create(
+                stream = await self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     tools=tools if tools else None,
                     tool_choice="auto" if tools else None,
                     temperature=Config.TEMPERATURE,
                     max_tokens=Config.MAX_TOKENS,
-                    extra_body={"route": Config.ROUTE_BY}
+                    extra_body={"route": Config.ROUTE_BY},
+                    stream=True,
+                    stream_options={"include_usage": True}
                 )
                 
-                assistant_message = response.choices[0].message
+                # Accumulate the response
+                accumulated_content = ""
+                accumulated_reasoning = ""
+                tool_calls_dict = {}
+                current_tool_call_id = None
+                reasoning_active = False
                 
-                # Check if the model wants to use tools
-                if assistant_message.tool_calls:
-                    # Add assistant message with tool calls to history
-                    tool_calls_data = [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments
-                            }
-                        }
-                        for tc in assistant_message.tool_calls
-                    ]
+                async for chunk in stream:
+                    if not chunk.choices:
+                        continue
                     
+                    delta = chunk.choices[0].delta
+                    
+                    # Handle reasoning tokens (extended thinking)
+                    if hasattr(delta, 'reasoning') and delta.reasoning:
+                        if not reasoning_active:
+                            reasoning_active = True
+                            yield "", {"type": "thinking_start"}
+                        
+                        accumulated_reasoning += delta.reasoning
+                        yield delta.reasoning, {"type": "reasoning", "partial": True}
+                    
+                    # Handle regular content
+                    if delta.content:
+                        if reasoning_active:
+                            reasoning_active = False
+                            yield "", {"type": "thinking_end"}
+                        
+                        accumulated_content += delta.content
+                        yield delta.content, {"type": "content", "partial": True}
+                    
+                    # Handle tool calls
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            
+                            if idx not in tool_calls_dict:
+                                tool_calls_dict[idx] = {
+                                    "id": tc_delta.id or "",
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc_delta.function.name or "",
+                                        "arguments": ""
+                                    }
+                                }
+                            
+                            if tc_delta.id:
+                                tool_calls_dict[idx]["id"] = tc_delta.id
+                            
+                            if tc_delta.function.name:
+                                tool_calls_dict[idx]["function"]["name"] = tc_delta.function.name
+                            
+                            if tc_delta.function.arguments:
+                                tool_calls_dict[idx]["function"]["arguments"] += tc_delta.function.arguments
+                
+                # End reasoning if still active
+                if reasoning_active:
+                    yield "", {"type": "thinking_end"}
+                
+                # Process tool calls if any
+                if tool_calls_dict:
+                    tool_calls_list = [tool_calls_dict[i] for i in sorted(tool_calls_dict.keys())]
+                    
+                    # Add assistant message with tool calls to history
                     self.conversation_history.append(
                         Message(
                             role="assistant",
-                            content=assistant_message.content or "",
-                            tool_calls=tool_calls_data
+                            content=accumulated_content,
+                            tool_calls=tool_calls_list
                         )
                     )
                     
                     # Execute each tool call
-                    for tool_call in assistant_message.tool_calls:
-                        function_name = tool_call.function.name
-                        function_args = json.loads(tool_call.function.arguments)
+                    for tool_call in tool_calls_list:
+                        function_name = tool_call["function"]["name"]
+                        function_args = json.loads(tool_call["function"]["arguments"])
                         
                         # Yield tool call information
                         yield "", {
                             "type": "tool_call",
                             "name": function_name,
                             "arguments": function_args,
-                            "id": tool_call.id
+                            "id": tool_call["id"]
                         }
                         
                         # Execute the tool
@@ -147,7 +199,7 @@ When using tools:
                             "type": "tool_result",
                             "name": function_name,
                             "result": result,
-                            "id": tool_call.id
+                            "id": tool_call["id"]
                         }
                         
                         # Add tool result to conversation
@@ -162,12 +214,12 @@ When using tools:
                         # Update messages for next iteration
                         messages.append({
                             "role": "assistant",
-                            "content": assistant_message.content or "",
-                            "tool_calls": tool_calls_data
+                            "content": accumulated_content,
+                            "tool_calls": tool_calls_list
                         })
                         messages.append({
                             "role": "tool",
-                            "tool_call_id": tool_call.id,
+                            "tool_call_id": tool_call["id"],
                             "content": result,
                             "name": function_name
                         })
@@ -175,25 +227,24 @@ When using tools:
                     # Continue the loop to get the final response
                     continue
                 else:
-                    # No tool calls, return the response
-                    content = assistant_message.content or ""
+                    # No tool calls, this is the final response
+                    if accumulated_content:
+                        # Add to history
+                        self.conversation_history.append(
+                            Message(role="assistant", content=accumulated_content)
+                        )
                     
-                    # Add to history
-                    self.conversation_history.append(
-                        Message(role="assistant", content=content)
-                    )
-                    
-                    # Yield the final response
-                    yield content, None
+                    # Signal completion
+                    yield "", {"type": "complete"}
                     break
                     
             except Exception as e:
                 error_msg = f"Error communicating with API: {str(e)}"
-                yield error_msg, None
+                yield error_msg, {"type": "error"}
                 break
         
         if iteration >= max_iterations:
-            yield "\n\n[Warning: Maximum tool call iterations reached]", None
+            yield "\n\n[Warning: Maximum tool call iterations reached]", {"type": "warning"}
     
     def clear_history(self):
         """Clear conversation history."""
@@ -202,4 +253,3 @@ When using tools:
     def get_history(self) -> List[Message]:
         """Get conversation history."""
         return self.conversation_history
-
