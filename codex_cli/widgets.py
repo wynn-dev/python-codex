@@ -1,5 +1,6 @@
 """Custom Textual widgets for Codex CLI."""
 
+from pathlib import Path
 from textual.widgets import Static
 from textual.containers import Container, VerticalScroll
 from rich.syntax import Syntax
@@ -141,9 +142,10 @@ class StatusBar(Static):
     }
     """
     
-    def __init__(self, **kwargs):
+    def __init__(self, workspace_path: Path = None, **kwargs):
         super().__init__("", **kwargs)
         self.model_name = "claude-3.5-sonnet"
+        self.workspace_path = workspace_path
         self.update_status()
     
     def update_status(self, message: str = "Ready"):
@@ -152,6 +154,9 @@ class StatusBar(Static):
         status_text.append("Codex CLI", style="bold white")
         status_text.append(" | ", style="dim white")
         status_text.append(f"Model: {self.model_name}", style="cyan")
+        if self.workspace_path:
+            status_text.append(" | ", style="dim white")
+            status_text.append(f"📁 {self.workspace_path.name}", style="yellow")
         status_text.append(" | ", style="dim white")
         status_text.append(message, style="green")
         self.update(status_text)
@@ -171,4 +176,3 @@ class StatusBar(Static):
         status_text.append(" | ", style="dim white")
         status_text.append(f"Error: {error}", style="bold red")
         self.update(status_text)
-

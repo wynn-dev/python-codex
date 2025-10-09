@@ -127,6 +127,17 @@ class ToolRegistry:
             },
             function=self.delete_file
         )
+        
+        self.register_tool(
+            name="get_workspace_info",
+            description="Get information about the current workspace directory, including path and statistics",
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": []
+            },
+            function=self.get_workspace_info
+        )
     
     def register_tool(self, name: str, description: str, parameters: Dict[str, Any], function: Callable):
         """Register a new tool."""
@@ -263,4 +274,45 @@ class ToolRegistry:
             return f"Successfully deleted {file_path}"
         except Exception as e:
             return f"Error deleting file: {str(e)}"
+    
+    async def get_workspace_info(self) -> str:
+        """Get information about the current workspace."""
+        try:
+            # Count files and directories
+            file_count = 0
+            dir_count = 0
+            total_size = 0
+            
+            for item in self.workspace_path.rglob('*'):
+                if item.is_file():
+                    file_count += 1
+                    try:
+                        total_size += item.stat().st_size
+                    except:
+                        pass
+                elif item.is_dir():
+                    dir_count += 1
+            
+            # Format size
+            size_mb = total_size / (1024 * 1024)
+            size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{total_size / 1024:.2f} KB"
+            
+            info = f"""Workspace Information:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Current Path: {self.workspace_path}
+Absolute Path: {self.workspace_path.resolve()}
+Directory Name: {self.workspace_path.name}
+Parent Directory: {self.workspace_path.parent}
+
+Statistics:
+  • Files: {file_count}
+  • Directories: {dir_count}
+  • Total Size: {size_str}
+
+Note: To work in a different directory, restart the app with:
+  codex /path/to/other/directory
+"""
+            return info
+        except Exception as e:
+            return f"Error getting workspace info: {str(e)}"
 

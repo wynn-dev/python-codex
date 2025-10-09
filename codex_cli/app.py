@@ -52,16 +52,17 @@ class CodexApp(App):
         Binding("ctrl+l", "clear", "Clear", show=True),
         Binding("ctrl+r", "reset", "Reset", show=False),
         Binding("ctrl+h", "help", "Help", show=True),
+        Binding("ctrl+w", "workspace_info", "Workspace", show=True),
     ]
     
     TITLE = "Codex CLI - AI Coding Assistant"
-    SUB_TITLE = "Powered by Claude 3.5 Sonnet via OpenRouter"
     
-    def __init__(self):
+    def __init__(self, workspace_path: Path):
         super().__init__()
-        self.workspace_path = Config.WORKSPACE_PATH
+        self.workspace_path = workspace_path
         self.client = CodexClient(self.workspace_path)
         self.is_processing = False
+        self.sub_title = f"📁 {self.workspace_path.name}"
     
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -76,7 +77,7 @@ class CodexApp(App):
                     id="message-input"
                 )
         
-        yield StatusBar()
+        yield StatusBar(workspace_path=self.workspace_path)
         yield Footer()
     
     async def on_mount(self) -> None:
@@ -104,11 +105,13 @@ I'm your AI coding assistant powered by **Claude 3.5 Sonnet**. I can help you wi
 - `execute_command` - Run shell commands
 - `search_files` - Find files by pattern
 - `delete_file` - Remove files
+- `get_workspace_info` - Get workspace information
 
 **Keyboard Shortcuts:**
 - `Ctrl+C` - Quit
 - `Ctrl+L` - Clear conversation
 - `Ctrl+H` - Show this help
+- `Ctrl+W` - Show workspace info
 
 What can I help you with today?
 """
@@ -192,6 +195,48 @@ What can I help you with today?
         status_bar = self.query_one(StatusBar)
         status_bar.set_ready()
     
+    def action_workspace_info(self) -> None:
+        """Show workspace information."""
+        conv_view = self.query_one(ConversationView)
+        
+        # Get workspace stats
+        try:
+            file_count = sum(1 for _ in self.workspace_path.rglob('*') if _.is_file())
+            dir_count = sum(1 for _ in self.workspace_path.rglob('*') if _.is_dir())
+        except:
+            file_count = "?"
+            dir_count = "?"
+        
+        workspace_info = f"""# Workspace Information
+
+**Path:** `{self.workspace_path}`  
+**Absolute Path:** `{self.workspace_path.resolve()}`  
+**Name:** `{self.workspace_path.name}`  
+**Parent:** `{self.workspace_path.parent}`
+
+**Statistics:**
+- Files: {file_count}
+- Directories: {dir_count}
+
+**Tip:** To work in a different directory:
+- Quit this session (Ctrl+C)
+- Run: `codex /path/to/other/directory`
+- Or: `codex ../relative/path`
+
+**Example:**
+```bash
+# Open a specific project
+codex ~/projects/my-app
+
+# Open parent directory
+codex ..
+
+# Open from anywhere
+codex /absolute/path/to/project
+```
+"""
+        conv_view.add_message("assistant", workspace_info)
+    
     def action_help(self) -> None:
         """Show help message."""
         conv_view = self.query_one(ConversationView)
@@ -202,6 +247,7 @@ What can I help you with today?
 - `Ctrl+C` - Quit the application
 - `Ctrl+L` - Clear conversation history
 - `Ctrl+H` - Show this help message
+- `Ctrl+W` - Show workspace information
 
 ## Available Tools
 
@@ -213,9 +259,21 @@ What can I help you with today?
 
 ### Directory Operations
 - **list_directory** - List contents of a directory
+- **get_workspace_info** - Get current workspace information
 
 ### Command Execution
 - **execute_command** - Run shell commands (use with caution)
+
+## Working with Different Directories
+
+To open a different workspace:
+1. Press `Ctrl+C` to quit
+2. Run `codex /path/to/directory`
+
+Examples:
+- `codex ~/projects/my-app` - Open specific project
+- `codex ..` - Open parent directory
+- `codex /absolute/path` - Open absolute path
 
 ## Tips
 - Be specific in your requests
@@ -228,12 +286,15 @@ What can I help you with today?
 - "Create a new Python file called hello.py with a hello world function"
 - "List all Python files in the current directory"
 - "Execute the command 'ls -la'"
+- "Search for all .js files in the src directory"
 """
         conv_view.add_message("assistant", help_msg)
 
 
-def run():
+def run(workspace_path: Path = None):
     """Run the Codex CLI application."""
-    app = CodexApp()
+    if workspace_path is None:
+        workspace_path = Config.WORKSPACE_PATH
+    
+    app = CodexApp(workspace_path)
     app.run()
-

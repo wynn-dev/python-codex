@@ -97,7 +97,8 @@ When using tools:
                     tools=tools if tools else None,
                     tool_choice="auto" if tools else None,
                     temperature=Config.TEMPERATURE,
-                    max_tokens=Config.MAX_TOKENS
+                    max_tokens=Config.MAX_TOKENS,
+                    extra_body={"route": Config.ROUTE_BY}
                 )
                 
                 assistant_message = response.choices[0].message
