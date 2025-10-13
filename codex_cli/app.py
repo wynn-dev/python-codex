@@ -144,6 +144,7 @@ ready"""
         
         self.is_processing = True
         streaming_started = False
+        has_content = False
         
         try:
             # Send message and handle streaming
@@ -153,11 +154,13 @@ ready"""
                     
                     # Handle thinking/reasoning
                     if info_type == "thinking_start":
+                        conv_view.hide_loading()
                         if not streaming_started:
                             conv_view.start_streaming()
                             streaming_started = True
                         conv_view.start_thinking()
                         status_bar.set_thinking()
+                        has_content = True
                     
                     elif info_type == "reasoning":
                         if content:
@@ -165,10 +168,13 @@ ready"""
                     
                     elif info_type == "thinking_end":
                         conv_view.end_thinking()
+                        # Show loader while waiting for content after thinking
+                        conv_view.show_loading("generating response")
                         status_bar.set_streaming()
                     
                     # Handle streaming content
                     elif info_type == "content":
+                        conv_view.hide_loading()
                         if not streaming_started:
                             conv_view.start_streaming()
                             streaming_started = True
@@ -176,6 +182,7 @@ ready"""
                         
                         if content:
                             conv_view.append_to_stream(content)
+                            has_content = True
                     
                     # Handle tool calls
                     elif info_type == "tool_call":
@@ -222,16 +229,20 @@ ready"""
                     elif info_type == "tool_result":
                         conv_view.hide_loading()
                         conv_view.add_message("tool_result", info["result"])
+                        # Show loader while waiting for next response after tool execution
+                        conv_view.show_loading("processing tool result")
                         status_bar.set_thinking()
                     
                     # Handle completion
                     elif info_type == "complete":
+                        conv_view.hide_loading()
                         if streaming_started:
                             conv_view.finalize_stream()
                             streaming_started = False
                     
                     # Handle errors
                     elif info_type == "error":
+                        conv_view.hide_loading()
                         if streaming_started:
                             conv_view.finalize_stream()
                             streaming_started = False
@@ -246,11 +257,13 @@ ready"""
                 else:
                     # Regular content without info
                     if content and not streaming_started:
+                        conv_view.hide_loading()
                         conv_view.start_streaming()
                         streaming_started = True
                     
                     if content:
                         conv_view.append_to_stream(content)
+                        has_content = True
             
             # Ensure stream is finalized
             if streaming_started:

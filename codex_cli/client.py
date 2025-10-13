@@ -45,7 +45,7 @@ class CodexClient:
         self.conversation_history: List[Message] = []
         
         # System prompt for the assistant
-        self.system_prompt = """You are Codex, an advanced AI coding assistant with access to powerful tools for file operations, code execution, and workspace management.
+        self.system_prompt = """You are Codex, an advanced AI coding assistant with access to powerful tools for file operations, code execution, and workspace management. Default language is Python.
 
 You can:
 - Read and write files in the workspace

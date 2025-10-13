@@ -18,36 +18,42 @@ class LoadingWidget(Static):
         margin: 0 0 1 0;
         padding: 1 2;
         background: #121212;
-        border-left: solid #3a3a3a;
+        border-left: solid #5a5a5a;
     }
     """
     
-    # Spinner frames
+    # Spinner frames - braille dots animation
     SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    
+    # Additional animation for dots
+    DOTS = ["", ".", "..", "..."]
     
     def __init__(self, message: str = "loading", **kwargs):
         super().__init__(**kwargs)
         self.message = message
         self.frame = 0
+        self.dots_frame = 0
         self.is_active = True
         self._update_display()
     
     def on_mount(self) -> None:
         """Start animation when mounted."""
-        self.set_interval(0.1, self.advance_frame)
+        self.set_interval(0.08, self.advance_frame)
     
     def advance_frame(self) -> None:
         """Advance to next animation frame."""
         if not self.is_active:
             return
         self.frame = (self.frame + 1) % len(self.SPINNER)
+        self.dots_frame = (self.dots_frame + 1) % len(self.DOTS)
         self._update_display()
     
     def _update_display(self) -> None:
         """Update the display with current frame."""
         text = Text()
-        text.append(f"{self.SPINNER[self.frame]} ", style="#888888")
-        text.append(self.message, style="#777777")
+        text.append(f"{self.SPINNER[self.frame]} ", style="bold #888888")
+        text.append(self.message, style="#999999")
+        text.append(self.DOTS[self.dots_frame], style="#777777")
         self.update(text)
     
     def stop(self) -> None:
@@ -352,7 +358,7 @@ class StatusBar(Static):
     
     def on_mount(self) -> None:
         """Start status bar animation."""
-        self.set_interval(0.1, self.advance_spinner)
+        self.set_interval(0.08, self.advance_spinner)
     
     def advance_spinner(self) -> None:
         """Advance spinner animation."""
@@ -376,9 +382,9 @@ class StatusBar(Static):
             status_text.append(" · ", style="#555555")
         
         if self.is_busy:
-            status_text.append(f"{self.SPINNER[self.spinner_frame]} ", style="#888888")
+            status_text.append(f"{self.SPINNER[self.spinner_frame]} ", style="bold #999999")
         
-        status_text.append(self.current_message, style="#888888")
+        status_text.append(self.current_message, style="#999999" if self.is_busy else "#888888")
         self.update(status_text)
     
     def set_thinking(self):
