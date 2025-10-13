@@ -18,8 +18,8 @@ class Config:
     
     # Application settings
     APP_NAME = "Codex CLI"
-    MAX_TOKENS = 4096
-    TEMPERATURE = 0.7
+    MAX_TOKENS = 20000
+    TEMPERATURE = 0
     
     # Model routing - sort by throughput (speed)
     ROUTE_BY = "throughput"
