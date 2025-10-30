@@ -1,5 +1,6 @@
 """OpenRouter client wrapper with tool calling support and streaming."""
 
+import asyncio
 import json
 from typing import List, Dict, Any, Optional, AsyncIterator
 from openai import AsyncOpenAI
@@ -52,21 +53,9 @@ You can:
 - Execute shell commands
 - Search for files
 - List directories
-- Analyze and generate code
 - Help with debugging and problem-solving
 
-When the user asks you to perform tasks, use the appropriate tools to accomplish them. Always be helpful, precise, and explain what you're doing.
-
-When writing code:
-- Write clean, well-documented code
-- Follow best practices
-- Include error handling
-- Add helpful comments
-
-When using tools:
-- Be explicit about what you're doing
-- Explain the results
-- Handle errors gracefully
+When the user asks you to write code, use the appropriate tools to accomplish them.
 """
     
     async def send_message(self, user_message: str) -> AsyncIterator[tuple[str, Optional[Dict]]]:
@@ -189,6 +178,12 @@ When using tools:
                             "name": function_name,
                             "arguments": function_args,
                             "id": tool_call["id"]
+                        }
+                        
+                        # Yield a special signal to let UI render
+                        yield "", {
+                            "type": "tool_call_ready",
+                            "name": function_name,
                         }
                         
                         # Execute the tool

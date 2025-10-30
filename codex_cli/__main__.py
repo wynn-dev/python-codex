@@ -13,7 +13,6 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  codex                    # Run in current directory
   codex /path/to/project   # Run in specific directory
   codex ../other-project   # Run in relative directory
   codex --workspace ~/dev  # Use --workspace flag
@@ -23,8 +22,7 @@ Examples:
     parser.add_argument(
         'workspace',
         nargs='?',
-        default='.',
-        help='Workspace directory to open (default: current directory)'
+        help='Workspace directory to open'
     )
     
     parser.add_argument(
@@ -41,8 +39,12 @@ Examples:
     
     args = parser.parse_args()
     
-    # Determine workspace path
+    # Determine workspace path - enforce that one is provided
     workspace_path = args.workspace_flag if args.workspace_flag else args.workspace
+    
+    if not workspace_path:
+        parser.error("workspace argument is required. Please provide a workspace directory.")
+    
     workspace_path = Path(workspace_path).resolve()
     
     # Validate workspace

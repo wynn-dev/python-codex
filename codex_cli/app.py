@@ -1,5 +1,6 @@
 """Main Textual application for Codex CLI."""
 
+import asyncio
 import json
 from pathlib import Path
 from textual.app import App, ComposeResult
@@ -155,19 +156,17 @@ ready"""
                     # Handle thinking/reasoning
                     if info_type == "thinking_start":
                         conv_view.hide_loading()
-                        if not streaming_started:
-                            conv_view.start_streaming()
-                            streaming_started = True
-                        conv_view.start_thinking()
+                        # Don't start streaming widget yet - just show thinking loader
+                        conv_view.start_thinking()  # This now shows a loader
                         status_bar.set_thinking()
                         has_content = True
                     
                     elif info_type == "reasoning":
                         if content:
-                            conv_view.append_thinking(content)
+                            conv_view.append_thinking(content)  # Just accumulates, doesn't display
                     
                     elif info_type == "thinking_end":
-                        conv_view.end_thinking()
+                        conv_view.end_thinking()  # Hides loader, shows summary
                         # Show loader while waiting for content after thinking
                         conv_view.show_loading("generating response")
                         status_bar.set_streaming()
@@ -186,51 +185,33 @@ ready"""
                     
                     # Handle tool calls
                     elif info_type == "tool_call":
+                        # Hide any existing loader first
+                        conv_view.hide_loading()
+                        
                         if streaming_started:
                             conv_view.finalize_stream()
                             streaming_started = False
                         
-                        # Format tool call in a user-friendly way
+                        # Create tool call widget
                         tool_name = info['name']
                         args = info['arguments']
+                        tool_call_id = info.get('id', f"tool_{len(conv_view.current_tool_widgets)}")
                         
-                        # Create readable description based on tool
-                        if tool_name == "read_file":
-                            tool_msg = f"{tool_name}\n→ reading {args.get('file_path', 'file')}"
-                        elif tool_name == "write_file":
-                            tool_msg = f"{tool_name}\n→ writing to {args.get('file_path', 'file')}"
-                        elif tool_name == "delete_file":
-                            tool_msg = f"{tool_name}\n→ deleting {args.get('file_path', 'file')}"
-                        elif tool_name == "list_directory":
-                            path = args.get('directory_path', '.')
-                            tool_msg = f"{tool_name}\n→ listing {path if path else 'current directory'}"
-                        elif tool_name == "execute_command":
-                            cmd = args.get('command', '')
-                            # Truncate long commands
-                            display_cmd = cmd if len(cmd) < 50 else cmd[:47] + "..."
-                            tool_msg = f"{tool_name}\n→ running: {display_cmd}"
-                        elif tool_name == "search_files":
-                            tool_msg = f"{tool_name}\n→ searching for {args.get('pattern', '*')}"
-                        elif tool_name == "get_workspace_info":
-                            tool_msg = f"{tool_name}\n→ gathering workspace stats"
-                        else:
-                            # Fallback for unknown tools - show args in a clean way
-                            arg_str = ", ".join(f"{k}={v}" for k, v in args.items())
-                            if len(arg_str) > 60:
-                                arg_str = arg_str[:57] + "..."
-                            tool_msg = f"{tool_name}\n→ {arg_str}"
-                        
-                        conv_view.add_message("tool_call", tool_msg)
-                        
-                        # Show loading for tool execution
-                        conv_view.show_loading(f"executing {info['name']}")
-                        status_bar.update_status(f"exec {info['name']}")
+                        conv_view.add_tool_call(tool_name, args, tool_call_id)
+                        status_bar.update_status(f"exec {tool_name}")
+                    
+                    elif info_type == "tool_call_ready":
+                        # Give UI explicit time to render the tool widget
+                        await asyncio.sleep(0.05)
                     
                     elif info_type == "tool_result":
-                        conv_view.hide_loading()
-                        conv_view.add_message("tool_result", info["result"])
-                        # Show loader while waiting for next response after tool execution
-                        conv_view.show_loading("processing tool result")
+                        # Add tool result
+                        tool_call_id = info.get('id', None)
+                        tool_name = info.get('name', 'unknown')
+                        result = info["result"]
+                        is_error = result.startswith("Error:") if isinstance(result, str) else False
+                        
+                        conv_view.add_tool_result(tool_call_id, tool_name, result, is_error=is_error)
                         status_bar.set_thinking()
                     
                     # Handle completion
@@ -349,10 +330,7 @@ streaming features
         conv_view.add_message("assistant", help_msg)
 
 
-def run(workspace_path: Path = None):
+def run(workspace_path: Path):
     """Run the Codex CLI application."""
-    if workspace_path is None:
-        workspace_path = Config.WORKSPACE_PATH
-    
     app = CodexApp(workspace_path)
     app.run()
