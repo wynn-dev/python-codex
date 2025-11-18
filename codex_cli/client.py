@@ -78,7 +78,7 @@ When the user asks you to write code, use the appropriate tools to accomplish th
         
         tools = self.tool_registry.get_tool_schemas()
         
-        max_iterations = 10  # Prevent infinite loops
+        max_iterations = 20  # Prevent infinite loops
         iteration = 0
         
         while iteration < max_iterations:
