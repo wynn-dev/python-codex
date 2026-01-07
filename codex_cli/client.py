@@ -11,11 +11,12 @@ from .tools import ToolRegistry
 class Message:
     """Represents a chat message."""
     
-    def __init__(self, role: str, content: str, tool_calls: Optional[List[Dict]] = None, name: Optional[str] = None):
+    def __init__(self, role: str, content: str, tool_calls: Optional[List[Dict]] = None, name: Optional[str] = None, tool_call_id: Optional[str] = None):
         self.role = role
         self.content = content
         self.tool_calls = tool_calls or []
         self.name = name
+        self.tool_call_id = tool_call_id
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert message to dictionary format for API."""
@@ -27,6 +28,8 @@ class Message:
             msg["tool_calls"] = self.tool_calls
         if self.name:
             msg["name"] = self.name
+        if self.tool_call_id:
+            msg["tool_call_id"] = self.tool_call_id
         return msg
 
 
@@ -75,7 +78,7 @@ When the user asks you to write code, use the appropriate tools to accomplish th
         
         tools = self.tool_registry.get_tool_schemas()
         
-        max_iterations = 10  # Prevent infinite loops
+        max_iterations = 20  # Prevent infinite loops
         iteration = 0
         
         while iteration < max_iterations:
@@ -167,6 +170,13 @@ When the user asks you to write code, use the appropriate tools to accomplish th
                         )
                     )
                     
+                    # Add assistant message with tool calls to messages (once, before processing tools)
+                    messages.append({
+                        "role": "assistant",
+                        "content": accumulated_content,
+                        "tool_calls": tool_calls_list
+                    })
+                    
                     # Execute each tool call
                     for tool_call in tool_calls_list:
                         function_name = tool_call["function"]["name"]
@@ -202,16 +212,12 @@ When the user asks you to write code, use the appropriate tools to accomplish th
                             Message(
                                 role="tool",
                                 content=result,
-                                name=function_name
+                                name=function_name,
+                                tool_call_id=tool_call["id"]
                             )
                         )
                         
-                        # Update messages for next iteration
-                        messages.append({
-                            "role": "assistant",
-                            "content": accumulated_content,
-                            "tool_calls": tool_calls_list
-                        })
+                        # Add tool result to messages for next iteration
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call["id"],
