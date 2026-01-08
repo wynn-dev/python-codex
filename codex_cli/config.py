@@ -21,8 +21,8 @@ class Config:
     MAX_TOKENS = 20000
     TEMPERATURE = 0
     
-    # Model routing - sort by throughput (speed)
-    ROUTE_BY = "throughput"
+    # Model routing - "fallback" or "sort"
+    ROUTE_BY = "fallback"
     
     # Workspace settings
     WORKSPACE_PATH = Path.cwd()
