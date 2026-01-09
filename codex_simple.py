@@ -6,6 +6,7 @@ import sys
 import json
 import asyncio
 import subprocess
+import uuid
 from pathlib import Path
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -22,8 +23,8 @@ load_dotenv()
 
 # Configuration
 API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-MODEL = os.getenv("OPENROUTER_DEFAULT_MODEL", "openai/gpt-5.2")
+BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://api.cerebras.ai/v1")
+MODEL = os.getenv("OPENROUTER_DEFAULT_MODEL", "zai-glm-4.7")
 MAX_TOKENS = 20000
 TEMPERATURE = 0
 
@@ -313,6 +314,7 @@ async def send_message(user_message: str) -> None:
     
     for iteration in range(10):  # Max 10 tool call iterations
         try:
+            # Create streaming request
             stream = await client.chat.completions.create(
                 model=MODEL,
                 messages=messages,
@@ -373,7 +375,12 @@ async def send_message(user_message: str) -> None:
             # Process tool calls if any
             if tool_calls_dict:
                 tool_calls_list = [tool_calls_dict[i] for i in sorted(tool_calls_dict.keys())]
-                
+
+                # Ensure all tool calls have valid IDs
+                for tc in tool_calls_list:
+                    if not tc.get("id"):
+                        tc["id"] = f"call_{uuid.uuid4().hex[:8]}"
+
                 # Add assistant message with tool calls
                 conversation_history.append({
                     "role": "assistant",
@@ -384,36 +391,43 @@ async def send_message(user_message: str) -> None:
                 # Execute each tool
                 for tc in tool_calls_list:
                     func_name = tc["function"]["name"]
-                    func_args = json.loads(tc["function"]["arguments"])
-                    
+
+                    # Parse arguments with error handling
+                    try:
+                        func_args = json.loads(tc["function"]["arguments"]) if tc["function"]["arguments"] else {}
+                    except json.JSONDecodeError as e:
+                        result = f"Error: Invalid JSON arguments: {e}"
+                        console.print(f"\n[bold cyan]> {func_name}[/bold cyan]")
+                        console.print(Text(result, style="red"))
+                        conversation_history.append({
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": result,
+                            "name": func_name
+                        })
+                        continue
+
                     # Show tool execution
                     args_display = ", ".join(f"{k}={repr(v)[:50]}" for k, v in func_args.items())
                     console.print(f"\n[bold cyan]> {func_name}[/bold cyan]({args_display})")
-                    
+
                     # Execute
                     result = await execute_tool(func_name, func_args)
                     format_tool_result(func_name, result)
-                    
+
+                    # Truncate result for API to prevent token overflow
+                    api_result = result if len(result) <= 10000 else result[:10000] + "\n... (truncated)"
+
                     # Add to conversation
                     conversation_history.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
-                        "content": result,
+                        "content": api_result,
                         "name": func_name
                     })
-                    
-                    # Update messages for next iteration
-                    messages.append({
-                        "role": "assistant",
-                        "content": accumulated_content,
-                        "tool_calls": tool_calls_list
-                    })
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": result,
-                        "name": func_name
-                    })
+
+                # Rebuild messages from conversation_history for next iteration
+                messages = [{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history
                 
                 console.print()
                 continue  # Continue to get model's response after tool execution
@@ -422,11 +436,18 @@ async def send_message(user_message: str) -> None:
                 # No tool calls - final response
                 if accumulated_content:
                     conversation_history.append({"role": "assistant", "content": accumulated_content})
+                elif not accumulated_reasoning:
+                    # Empty response - no content and no reasoning
+                    console.print("[dim]No response generated[/dim]")
                 break
-        
+
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
             break
+
+    else:
+        # Loop completed without break - hit iteration limit
+        console.print("[yellow]Warning: Reached maximum tool call iterations (10)[/yellow]")
 
 
 # =============================================================================
@@ -470,7 +491,7 @@ def show_info():
     try:
         file_count = sum(1 for _ in workspace_path.rglob('*') if _.is_file())
         dir_count = sum(1 for _ in workspace_path.rglob('*') if _.is_dir())
-    except:
+    except (OSError, PermissionError):
         file_count = dir_count = "?"
     
     console.print(f"""
